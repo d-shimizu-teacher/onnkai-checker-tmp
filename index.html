@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <title>おんかいチェッカー</title>
+  <style>
+    body {
+      font-family: 'Helvetica Neue', Arial, sans-serif;
+      text-align: center;
+      background-color: #eef7ff;
+      margin: 0;
+      padding: 20px;
+    }
+    .container {
+      max-width: 450px;
+      margin: 10px auto;
+      background: white;
+      padding: 25px;
+      border-radius: 24px;
+      box-shadow: 0 8px 20px rgba(0,0,0,0.08);
+    }
+    h1 {
+      color: #333;
+      font-size: 22px;
+      margin-bottom: 20px;
+    }
+    
+    #start-btn {
+      font-size: 20px;
+      padding: 14px 36px;
+      background-color: #ff5252;
+      color: white;
+      border: none;
+      border-radius: 50px;
+      cursor: pointer;
+      font-weight: bold;
+      box-shadow: 0 4px 12px rgba(255,82,82,0.3);
+      transition: transform 0.1s ease;
+      margin-bottom: 20px;
+    }
+    #start-btn:active {
+      transform: scale(0.96);
+    }
+
+    /* 無段階スライダーエリア */
+    .slider-box {
+      background-color: #f8f9fa;
+      border: 2px solid #e0e0e0;
+      border-radius: 16px;
+      padding: 16px;
+      margin-bottom: 20px;
+    }
+    .slider-title {
+      font-size: 14px;
+      font-weight: bold;
+      color: #555;
+      margin-bottom: 8px;
+    }
+    .slider-label {
+      font-size: 15px;
+      font-weight: bold;
+      color: #2196f3;
+      margin-bottom: 8px;
+      min-height: 24px;
+    }
+
+    .threshold-val-display {
+      font-size: 13px;
+      color: #777;
+      margin-bottom: 12px;
+      font-weight: bold;
+    }
+    .threshold-val-display span {
+      color: #d32f2f;
+      font-size: 15px;
+    }
+
+    input[type="range"] {
+      width: 100%;
+      height: 10px;
+      border-radius: 5px;
+      background: #ddd;
+      outline: none;
+      accent-color: #2196f3;
+      cursor: pointer;
+    }
+    .slider-scale {
+      display: flex;
+      justify-content: space-between;
+      font-size: 12px;
+      color: #888;
+      margin-top: 6px;
+      font-weight: bold;
+    }
+
+    #note-display {
+      font-size: 64px;
+      font-weight: bold;
+      margin: 20px 0;
+      min-height: 110px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #bbbbbb;
+    }
+    
+    #detail-display {
+      font-size: 18px;
+      color: #666;
+      min-height: 30px;
+      font-weight: bold;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>おんかいチェッカー 🎵</h1>
+    
+    <button id="start-btn" onclick="toggleAudio()">マイク スタート</button>
+
+    <div class="slider-box">
+      <div class="slider-title">ひろう おとの はんい</div>
+      <div id="slider-value-text" class="slider-label">📱 じぶんの 班だけ（30cm以内）</div>
+      
+      <div class="threshold-val-display">（しきい値: <span id="threshold-num">0.12</span>）</div>
+
+      <input type="range" id="sensitivity-slider" min="0.02" max="0.30" step="0.01" value="0.12" oninput="updateSensitivity(this.value)">
+      
+      <div class="slider-scale">
+        <span>📢 とおく</span>
+        <span>📱 ぴったり</span>
+      </div>
+    </div>
+
+    <div id="note-display">--</div>
+    <div id="detail-display">グラスを たたいてみてね！</div>
+  </div>
+
+  <script>
+    let audioCtx = null;
+    let analyser = null;
+    let isListening = false;
+    let animationId = null;
+
+    let sensitivityThreshold = 0.12;
+
+    let previousRms = 0;
+    let displayHoldTimer = null;
+
+    const noteData = [
+      { name: "ド", color: "#e53935", sub: "ド" },
+      { name: "ド と レ の あいだ", color: "#d81b60", sub: "（ちょっとたかい ド）" },
+      { name: "レ", color: "#fb8c00", sub: "レ" },
+      { name: "レ と ミ の あいだ", color: "#fdd835", sub: "（ちょっとたかい レ）" },
+      { name: "ミ", color: "#7cb342", sub: "ミ" },
+      { name: "ファ", color: "#43a047", sub: "ファ" },
+      { name: "ファ と ソ の あいだ", color: "#00acc1", sub: "（ちょっとたかい ファ）" },
+      { name: "ソ", color: "#1e88e5", sub: "ソ" },
+      { name: "ソ と ラ の あいだ", color: "#3949ab", sub: "（ちょっとたかい ソ）" },
+      { name: "ラ", color: "#8e24aa", sub: "ラ" },
+      { name: "ラ と シ の あいだ", color: "#e91e63", sub: "（ちょっとたかい ラ）" },
+      { name: "シ", color: "#f06292", sub: "シ" }
+    ];
+
+    function updateSensitivity(val) {
+      sensitivityThreshold = parseFloat(val);
+      document.getElementById("threshold-num").innerText = sensitivityThreshold.toFixed(2);
+      
+      const label = document.getElementById("slider-value-text");
+      if (sensitivityThreshold >= 0.20) {
+        label.innerText = "📱 ぴったり（iPadに近づける）";
+      } else if (sensitivityThreshold >= 0.10) {
+        label.innerText = "📱 じぶんの 班だけ（30cm以内）";
+      } else if (sensitivityThreshold >= 0.05) {
+        label.innerText = "🏫 ふつう（静かな時用）";
+      } else {
+        label.innerText = "📢 とおく（ひろく ひろう）";
+      }
+    }
+
+    async function toggleAudio() {
+      const btn = document.getElementById("start-btn");
+      
+      if (!isListening) {
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({ 
+            audio: { 
+              echoCancellation: false, 
+              noiseSuppression: false,
+              autoGainControl: false 
+            } 
+          });
+
+          audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+          if (audioCtx.state === 'suspended') {
+            await audioCtx.resume();
+          }
+
+          const source = audioCtx.createMediaStreamSource(stream);
+          analyser = audioCtx.createAnalyser();
+          analyser.fftSize = 4096;
+          source.connect(analyser);
+
+          isListening = true;
+          btn.innerText = "ストップ";
+          btn.style.backgroundColor = "#757575";
+          detectPitch();
+
+        } catch (err) {
+          alert("マイクが許可されなかったか、取得できませんでした。\nブラウザのアドレスバーの［鍵マーク］からマイクを［許可］にしてください。");
+        }
+      } else {
+        if (audioCtx) audioCtx.close();
+        cancelAnimationFrame(animationId);
+        if (displayHoldTimer) clearTimeout(displayHoldTimer);
+        isListening = false;
+        btn.innerText = "マイク スタート";
+        btn.style.backgroundColor = "#ff5252";
+        resetDisplay();
+      }
+    }
+
+    function resetDisplay() {
+      const displayElem = document.getElementById("note-display");
+      const detailElem = document.getElementById("detail-display");
+      displayElem.innerText = "--";
+      displayElem.style.color = "#bbbbbb";
+      detailElem.innerText = "グラスを たたいてみてね！";
+    }
+
+    function detectPitch() {
+      const buffer = new Float32Array(analyser.fftSize);
+      analyser.getFloatTimeDomainData(buffer);
+
+      let rms = 0;
+      for (let i = 0; i < buffer.length; i++) {
+        rms += buffer[i] * buffer[i];
+      }
+      rms = Math.sqrt(rms / buffer.length);
+
+      const isAttack = (rms > sensitivityThreshold) && (rms > previousRms * 1.5);
+
+      if (isAttack) {
+        const pitch = autoCorrelatePercussive(buffer, audioCtx.sampleRate);
+        
+        if (pitch !== -1 && pitch > 130 && pitch < 2500) {
+          const noteNum = Math.round(12 * (Math.log2(pitch / 440)) + 69);
+          const noteIndex = (noteNum % 12 + 12) % 12;
+
+          const info = noteData[noteIndex];
+          const displayElem = document.getElementById("note-display");
+          const detailElem = document.getElementById("detail-display");
+
+          displayElem.innerText = info.name;
+          displayElem.style.color = info.color;
+          displayElem.style.fontSize = info.name.length > 3 ? "32px" : "72px";
+          detailElem.innerText = info.sub;
+
+          // 1.5秒後に自動で画面を消去（リセット）するタイマー
+          if (displayHoldTimer) clearTimeout(displayHoldTimer);
+          displayHoldTimer = setTimeout(() => {
+            resetDisplay();
+          }, 1500);
+        }
+      }
+
+      previousRms = rms;
+
+      if (isListening) {
+        animationId = requestAnimationFrame(detectPitch);
+      }
+    }
+
+    function autoCorrelatePercussive(buffer, sampleRate) {
+      const SIZE = buffer.length;
+      let c = new Float32Array(SIZE);
+      
+      for (let i = 0; i < SIZE; i++) {
+        for (let j = 0; j < SIZE - i; j++) {
+          c[i] = c[i] + buffer[j] * buffer[j + i];
+        }
+      }
+
+      let d = 0;
+      while (c[d] > c[d + 1]) d++;
+
+      let maxval = -1, maxpos = -1;
+      for (let i = d; i < SIZE / 2; i++) {
+        if (c[i] > maxval) {
+          maxval = c[i];
+          maxpos = i;
+        }
+      }
+
+      let T0 = maxpos;
+
+      if (T0 > 0 && T0 < SIZE - 1) {
+        const x1 = c[T0 - 1], x2 = c[T0], x3 = c[T0 + 1];
+        const a = (x1 + x3 - 2 * x2) / 2;
+        const b = (x3 - x1) / 2;
+        if (a !== 0) {
+          T0 = T0 - b / (2 * a);
+        }
+        return sampleRate / T0;
+      }
+      return -1;
+    }
+  </script>
+</body>
+</html>
